@@ -980,14 +980,28 @@ app.get('/api/notes', async (req, res) => {
 });
 
 app.post('/api/notes', async (req, res) => {
+  console.log('📝 POST /api/notes received');
   const { title, content } = req.body;
-  if (!title) return res.status(400).json({ error: 'Title is required' });
-  const { data, error } = await supabase
-    .from('notes')
-    .insert({ title, content })
-    .select();
-  if (error) return res.status(500).json({ error: error.message });
-  res.status(201).json(data[0]);
+  console.log('Title:', title, 'Content:', content);
+  if (!title) {
+    console.log('❌ Missing title');
+    return res.status(400).json({ error: 'Title is required' });
+  }
+  try {
+    const { data, error } = await supabase
+      .from('notes')
+      .insert({ title, content })
+      .select();
+    if (error) {
+      console.error('❌ Supabase error:', error);
+      throw error;
+    }
+    console.log('✅ Note saved:', data[0]);
+    res.status(201).json(data[0]);
+  } catch (err) {
+    console.error('❌ Error saving note:', err.message);
+    res.status(500).json({ error: err.message });
+  }
 });
 
 app.patch('/api/notes/:id', async (req, res) => {
