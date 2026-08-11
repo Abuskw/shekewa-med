@@ -97,22 +97,12 @@ app.post('/api/customers', async (req, res) => {
 });
 
 // ----- Products -----
-app.get('/api/products', async (req, res) => {
-  const { limit = 10, offset = 0, search = '', category = '' } = req.query;
-  let query = supabase
+
+  app.get('/api/products', async (req, res) => {
+  const { data, error } = await supabase
     .from('products')
-    .select('*', { count: 'exact' })
+    .select('*')
     .order('name');
-
-  if (search) {
-    query = query.ilike('name', `%${search}%`);
-  }
-  if (category && category !== 'all') {
-    query = query.eq('category', category);
-  }
-
-  const { data, error, count } = await query
-    .range(parseInt(offset), parseInt(offset) + parseInt(limit) - 1);
 
   if (error) return res.status(500).json({ error: error.message });
 
@@ -120,10 +110,8 @@ app.get('/api/products', async (req, res) => {
     ...p,
     low_stock: (p.quantity || 0) <= 5,
   }));
-
-  res.json({ data: products, total: count });
+  res.json(products);
 });
-
 app.post('/api/products', async (req, res) => {
   const { name, price, category, image, quantity } = req.body;
   if (!name || price === undefined) {
