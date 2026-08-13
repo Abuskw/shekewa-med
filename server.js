@@ -44,6 +44,33 @@ admin.initializeApp({
 console.log('🔌 Connected to Supabase:', supabaseUrl);
 
 // ========== SEED DEFAULT PRODUCTS ==========
+// ---- Helper to send push notifications ----
+async function sendPushNotification(title, body, data = {}) {
+  // Get all tokens from Supabase
+  const { data: tokens, error } = await supabase
+    .from('push_tokens')
+    .select('token');
+  if (error) {
+    console.error('Error fetching push tokens:', error);
+    return;
+  }
+  if (tokens.length === 0) return;
+
+  const registrationTokens = tokens.map(t => t.token);
+  const message = {
+    notification: { title, body },
+    data: data,
+    tokens: registrationTokens,
+  };
+
+  try {
+    const response = await admin.messaging().sendEachForMulticast(message);
+    console.log(`${response.successCount} push notifications sent`);
+    // Optionally clean up failed tokens here
+  } catch (err) {
+    console.error('Push send error:', err);
+  }
+}
 async function seedProducts() {
   const { data: existing, error, count } = await supabase
     .from('products')
