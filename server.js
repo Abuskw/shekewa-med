@@ -1,3 +1,4 @@
+
 const express = require('express');
 const cors = require('cors');
 const { createClient } = require('@supabase/supabase-js');
@@ -31,6 +32,13 @@ if (process.env.HTTP_PROXY) {
 
 const supabase = createClient(supabaseUrl, supabaseKey, {
   fetch: customFetch,
+});
+// ---- Firebase Admin for push notifications ----
+const admin = require('firebase-admin');
+const serviceAccount = require('./serviceAccountKey.json');
+
+admin.initializeApp({
+  credential: admin.credential.cert(serviceAccount),
 });
 
 console.log('🔌 Connected to Supabase:', supabaseUrl);
