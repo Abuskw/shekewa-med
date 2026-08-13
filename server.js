@@ -35,7 +35,15 @@ const supabase = createClient(supabaseUrl, supabaseKey, {
 });
 // ---- Firebase Admin for push notifications ----
 const admin = require('firebase-admin');
-const serviceAccount = require('./serviceAccountKey.json');
+
+// Use environment variable or local file (fallback for local development)
+let serviceAccount;
+if (process.env.FIREBASE_SERVICE_ACCOUNT) {
+  serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT);
+} else {
+  // For local development, load from file (ensure .gitignore includes it)
+  serviceAccount = require('./serviceAccountKey.json');
+}
 
 admin.initializeApp({
   credential: admin.credential.cert(serviceAccount),
