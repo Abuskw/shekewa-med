@@ -34,14 +34,15 @@ const supabase = createClient(supabaseUrl, supabaseKey, {
   fetch: customFetch,
 });
 // ---- Firebase Admin for push notifications ----
+// ---- Firebase Admin for push notifications ----
 const admin = require('firebase-admin');
 
-// Use environment variable or local file (fallback for local development)
 let serviceAccount;
 if (process.env.FIREBASE_SERVICE_ACCOUNT) {
+  // On Render, use the environment variable
   serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT);
 } else {
-  // For local development, load from file (ensure .gitignore includes it)
+  // On your local machine, load from the file (make sure it's in .gitignore)
   serviceAccount = require('./serviceAccountKey.json');
 }
 
