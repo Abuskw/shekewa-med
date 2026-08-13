@@ -33,23 +33,18 @@ if (process.env.HTTP_PROXY) {
 const supabase = createClient(supabaseUrl, supabaseKey, {
   fetch: customFetch,
 });
-// ---- Firebase Admin for push notifications ----
-// ---- Firebase Admin for push notifications ----
 const admin = require('firebase-admin');
 
 let serviceAccount;
 if (process.env.FIREBASE_SERVICE_ACCOUNT) {
-  // On Render, use the environment variable
   serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT);
 } else {
-  // On your local machine, load from the file (make sure it's in .gitignore)
   serviceAccount = require('./serviceAccountKey.json');
 }
 
 admin.initializeApp({
   credential: admin.credential.cert(serviceAccount),
 });
-
 console.log('🔌 Connected to Supabase:', supabaseUrl);
 
 // ========== SEED DEFAULT PRODUCTS ==========
