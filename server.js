@@ -36,8 +36,8 @@ const supabase = createClient(supabaseUrl, supabaseKey, {
 console.log('🔌 Connected to Supabase:', supabaseUrl);
 
 // ========== FIREBASE ADMIN (Push Notifications) ==========
+// ---- Firebase Admin for push notifications ----
 const admin = require('firebase-admin');
-const { cert } = require('firebase-admin/credential');
 
 let adminInitialized = false;
 let serviceAccount;
@@ -62,19 +62,30 @@ if (process.env.FIREBASE_SERVICE_ACCOUNT) {
 
 if (serviceAccount) {
   try {
-    admin.initializeApp({
-      credential: cert(serviceAccount), // ✅ Using cert directly
-    });
-    adminInitialized = true;
-    console.log('✅ Firebase Admin initialized successfully');
+    // Check if admin.credential is available
+    if (admin.credential && typeof admin.credential.cert === 'function') {
+      admin.initializeApp({
+        credential: admin.credential.cert(serviceAccount),
+      });
+      adminInitialized = true;
+      console.log('✅ Firebase Admin initialized successfully with cert');
+    } else {
+      // Fallback: try applicationDefault (useful for Google Cloud environments)
+      console.warn('⚠️ admin.credential.cert not available, trying applicationDefault');
+      admin.initializeApp({
+        credential: admin.credential.applicationDefault(),
+      });
+      adminInitialized = true;
+      console.log('✅ Firebase Admin initialized with applicationDefault');
+    }
   } catch (e) {
     console.error('❌ Firebase Admin initialization failed:', e.message);
   }
 } else {
-  console.warn('⚠️ No service account provided. Push notifications will be disabled.');
+  console.warn('⚠️ No service account provided. Push notifications disabled.');
 }
 
-// ---- Helper to send push notifications (safe) ----
+// ---- Helper to send push notifications ----
 async function sendPushNotification(title, body, data = {}) {
   if (!adminInitialized) {
     console.warn('⚠️ Push notifications disabled – Firebase Admin not initialized.');
