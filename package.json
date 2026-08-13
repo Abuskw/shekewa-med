@@ -1,0 +1,21 @@
+{
+  "name": "skw-med",
+  "version": "1.0.0",
+  "description": "shekewa med management app",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "@capacitor/android": "^8.5.0",
+    "@capacitor/push-notifications": "^8.1.2",
+    "@capacitor/splash-screen": "^8.0.2",
+    "@supabase/supabase-js": "^2.112.3",
+    "compression": "^1.7.4",
+    "cors": "^2.8.5",
+    "dotenv": "^16.3.1",
+    "express": "^4.18.2",
+    "firebase-admin": "^14.2.0",
+    "idb": "^8.0.3"
+  }
+}
