@@ -1,4 +1,3 @@
-
 const express = require('express');
 const cors = require('cors');
 const { createClient } = require('@supabase/supabase-js');
@@ -33,38 +32,38 @@ if (process.env.HTTP_PROXY) {
 const supabase = createClient(supabaseUrl, supabaseKey, {
   fetch: customFetch,
 });
-// ---- Firebase Admin for push notifications ----
-let admin;
-let adminInitialized = false;
-try {
-  admin = require('firebase-admin');
-  console.log('✅ firebase-admin module loaded');
-} catch (e) {
-  console.error('❌ firebase-admin module not found:', e.message);
-}
 
+console.log('🔌 Connected to Supabase:', supabaseUrl);
+
+// ========== FIREBASE ADMIN (Push Notifications) ==========
+const admin = require('firebase-admin');
+const { cert } = require('firebase-admin/credential');
+
+let adminInitialized = false;
 let serviceAccount;
-if (admin && process.env.FIREBASE_SERVICE_ACCOUNT) {
+
+if (process.env.FIREBASE_SERVICE_ACCOUNT) {
   try {
     serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT);
     console.log('✅ Service account loaded from environment variable');
   } catch (e) {
     console.error('❌ Invalid FIREBASE_SERVICE_ACCOUNT JSON:', e.message);
+    serviceAccount = null;
   }
-} else if (admin) {
-  // Fallback to local file (development)
+} else {
+  // Local development fallback – ensure file is in .gitignore
   try {
     serviceAccount = require('./serviceAccountKey.json');
     console.log('✅ Service account loaded from file');
   } catch (e) {
-    console.warn('⚠️ serviceAccountKey.json not found');
+    console.warn('⚠️ serviceAccountKey.json not found. Push notifications disabled.');
   }
 }
 
-if (admin && serviceAccount) {
+if (serviceAccount) {
   try {
     admin.initializeApp({
-      credential: admin.credential.cert(serviceAccount),
+      credential: cert(serviceAccount), // ✅ Using cert directly
     });
     adminInitialized = true;
     console.log('✅ Firebase Admin initialized successfully');
@@ -72,7 +71,7 @@ if (admin && serviceAccount) {
     console.error('❌ Firebase Admin initialization failed:', e.message);
   }
 } else {
-  console.warn('⚠️ Firebase Admin not initialized. Push notifications disabled.');
+  console.warn('⚠️ No service account provided. Push notifications will be disabled.');
 }
 
 // ---- Helper to send push notifications (safe) ----
@@ -100,41 +99,12 @@ async function sendPushNotification(title, body, data = {}) {
 
     const response = await admin.messaging().sendEachForMulticast(message);
     console.log(`${response.successCount} push notifications sent`);
-    // Optionally clean up failed tokens here
   } catch (err) {
     console.error('Push send error:', err);
   }
 }
-console.log('🔌 Connected to Supabase:', supabaseUrl);
 
 // ========== SEED DEFAULT PRODUCTS ==========
-// ---- Helper to send push notifications ----
-async function sendPushNotification(title, body, data = {}) {
-  // Get all tokens from Supabase
-  const { data: tokens, error } = await supabase
-    .from('push_tokens')
-    .select('token');
-  if (error) {
-    console.error('Error fetching push tokens:', error);
-    return;
-  }
-  if (tokens.length === 0) return;
-
-  const registrationTokens = tokens.map(t => t.token);
-  const message = {
-    notification: { title, body },
-    data: data,
-    tokens: registrationTokens,
-  };
-
-  try {
-    const response = await admin.messaging().sendEachForMulticast(message);
-    console.log(`${response.successCount} push notifications sent`);
-    // Optionally clean up failed tokens here
-  } catch (err) {
-    console.error('Push send error:', err);
-  }
-}
 async function seedProducts() {
   const { data: existing, error, count } = await supabase
     .from('products')
@@ -196,8 +166,7 @@ app.post('/api/customers', async (req, res) => {
 });
 
 // ----- Products -----
-
-  app.get('/api/products', async (req, res) => {
+app.get('/api/products', async (req, res) => {
   const { data, error } = await supabase
     .from('products')
     .select('*')
@@ -211,6 +180,7 @@ app.post('/api/customers', async (req, res) => {
   }));
   res.json(products);
 });
+
 app.post('/api/products', async (req, res) => {
   const { name, price, category, image, quantity } = req.body;
   if (!name || price === undefined) {
@@ -224,7 +194,6 @@ app.post('/api/products', async (req, res) => {
       price: parseFloat(price),
       category: category || '',
       quantity: parseInt(quantity) || 0,
-      // image removed
     })
     .select();
 
@@ -234,56 +203,46 @@ app.post('/api/products', async (req, res) => {
 
 app.patch('/api/products/:id', async (req, res) => {
   const { id } = req.params;
-  const { name, price, category, quantity, } = req.body;
-
+  const { name, price, category, quantity } = req.body;
   const updates = {};
   if (name !== undefined) updates.name = name;
   if (price !== undefined) updates.price = parseFloat(price);
   if (category !== undefined) updates.category = category;
   if (quantity !== undefined) updates.quantity = parseInt(quantity);
- 
-
   const { data, error } = await supabase
     .from('products')
     .update(updates)
     .eq('id', id)
     .select();
-
   if (error) return res.status(500).json({ error: error.message });
   res.json(data[0]);
 });
 
 app.delete('/api/products/:id', async (req, res) => {
   const { id } = req.params;
-
   // Check if product has sales or loans
   const { data: sales, error: salesErr } = await supabase
     .from('sales')
     .select('id')
     .eq('product_id', id)
     .limit(1);
-
   if (salesErr) return res.status(500).json({ error: salesErr.message });
   if (sales && sales.length > 0) {
     return res.status(400).json({ error: 'Cannot delete: product has sales' });
   }
-
   const { data: loans, error: loansErr } = await supabase
     .from('loans')
     .select('id')
     .eq('product_id', id)
     .limit(1);
-
   if (loansErr) return res.status(500).json({ error: loansErr.message });
   if (loans && loans.length > 0) {
     return res.status(400).json({ error: 'Cannot delete: product has loans' });
   }
-
   const { error } = await supabase
     .from('products')
     .delete()
     .eq('id', id);
-
   if (error) return res.status(500).json({ error: error.message });
   res.json({ success: true });
 });
@@ -302,31 +261,23 @@ app.get('/api/products/check', async (req, res) => {
 
 // ----- Sales -----
 app.post('/api/sales', async (req, res) => {
- const { productId, customerId, amount, quantity, orderId } = req.body;
-
-
+  const { productId, customerId, amount, quantity, orderId } = req.body;
   if (!productId || !customerId) {
     return res.status(400).json({ error: 'Product and customer are required' });
   }
-
   const qty = parseInt(quantity) || 1;
-
   // Get product and check stock
   const { data: product, error: prodErr } = await supabase
     .from('products')
     .select('price, quantity')
     .eq('id', productId)
     .single();
-
   if (prodErr) return res.status(500).json({ error: prodErr.message });
   if (!product) return res.status(404).json({ error: 'Product not found' });
-
   if (product.quantity < qty) {
     return res.status(400).json({ error: `Insufficient stock (available: ${product.quantity})` });
   }
-
   const finalAmount = amount || product.price * qty;
-
   // Insert sale
   const { data: sale, error: saleErr } = await supabase
     .from('sales')
@@ -341,23 +292,13 @@ app.post('/api/sales', async (req, res) => {
       customers (name, phone),
       products (name, price)
     `);
-
   if (saleErr) return res.status(500).json({ error: saleErr.message });
-
   // Update stock
   const newStock = product.quantity - qty;
   await supabase
     .from('products')
     .update({ quantity: newStock })
     .eq('id', productId);
-    const saleData = {
-    product_id: productId,
-    customer_id: customerId,
-    amount: finalAmount,
-    quantity: qty,
-    order_id: orderId || null,
-  };
-
   res.status(201).json(sale[0]);
 });
 
@@ -372,14 +313,12 @@ app.get('/api/sales', async (req, res) => {
       products (name, price)
     `)
     .order('created_at', { ascending: false });
-
   if (startDate) {
     query = query.gte('created_at', `${startDate}T00:00:00`);
   }
   if (endDate) {
     query = query.lte('created_at', `${endDate}T23:59:59`);
   }
-
   const { data, error } = await query;
   if (error) return res.status(500).json({ error: error.message });
   res.json(data);
@@ -390,8 +329,6 @@ app.post('/api/orders', async (req, res) => {
   if (!customerId || !items || items.length === 0) {
     return res.status(400).json({ error: 'Customer and items are required' });
   }
-
-  // Validate stock for each item and calculate amounts
   const salesData = [];
   for (const item of items) {
     const { data: product, error } = await supabase
@@ -419,15 +356,11 @@ app.post('/api/orders', async (req, res) => {
       .update({ quantity: product.quantity - item.quantity })
       .eq('id', item.productId);
   }
-
-  // Insert all sales
   const { data, error } = await supabase
     .from('sales')
     .insert(salesData)
     .select();
-
   if (error) return res.status(500).json({ error: error.message });
-
   res.status(201).json({ success: true, sales: data });
 });
 
@@ -442,10 +375,11 @@ app.get('/api/sales/order/:orderId', async (req, res) => {
       products (name, price)
     `)
     .eq('order_id', orderId);
-
   if (error) return res.status(500).json({ error: error.message });
   res.json(data);
 });
+
+// ----- Loans -----
 app.get('/api/loans', async (req, res) => {
   const { startDate, endDate } = req.query;
   try {
@@ -457,14 +391,12 @@ app.get('/api/loans', async (req, res) => {
         products (name, price)
       `)
       .order('created_at', { ascending: false });
-
     if (startDate) {
       query = query.gte('created_at', `${startDate}T00:00:00`);
     }
     if (endDate) {
       query = query.lte('created_at', `${endDate}T23:59:59`);
     }
-
     const { data, error } = await query;
     if (error) throw error;
     res.json(data);
@@ -474,67 +406,22 @@ app.get('/api/loans', async (req, res) => {
   }
 });
 
-// ----- Bulk Import Products -----
-app.post('/api/products/bulk', async (req, res) => {
-  const { products } = req.body;
-  if (!products || !Array.isArray(products) || products.length === 0) {
-    return res.status(400).json({ error: 'No products to import' });
-  }
-
-  try {
-    // Validate and prepare data
-    const productData = products.map(p => ({
-      name: p.name.trim(),
-      price: parseFloat(p.price),
-      category: p.category?.trim() || 'Sweet',
-      quantity: parseInt(p.quantity) || 0,
-    }));
-
-    // Insert all products
-    const { data, error } = await supabase
-      .from('products')
-      .insert(productData)
-      .select();
-
-    if (error) throw error;
-
-    res.status(201).json({
-      success: true,
-      imported: data.length,
-      products: data,
-    });
-  } catch (err) {
-    console.error('Bulk import error:', err);
-    res.status(500).json({ error: err.message });
-  }
-});
-
-
-// ----- Loans -----
 app.post('/api/loans', async (req, res) => {
   const { customerId, productId, amount, due_date, notes, quantity } = req.body;
-
   if (!customerId || !productId || !amount || amount <= 0) {
     return res.status(400).json({ error: 'Customer, product, and amount > 0 are required' });
   }
-
   const qty = parseInt(quantity) || 1;
-
-  // 1. Get product and check stock
   const { data: product, error: prodErr } = await supabase
     .from('products')
     .select('quantity')
     .eq('id', productId)
     .single();
-
   if (prodErr) return res.status(500).json({ error: prodErr.message });
   if (!product) return res.status(404).json({ error: 'Product not found' });
-
   if (product.quantity < qty) {
     return res.status(400).json({ error: `Insufficient stock (available: ${product.quantity})` });
   }
-
-  // 2. Insert loan
   const { data: loan, error } = await supabase
     .from('loans')
     .insert({
@@ -551,16 +438,12 @@ app.post('/api/loans', async (req, res) => {
       customers (name, phone),
       products (name, price)
     `);
-
   if (error) return res.status(500).json({ error: error.message });
-
-  // 3. Decrease stock
   const newStock = product.quantity - qty;
   await supabase
     .from('products')
     .update({ quantity: newStock })
     .eq('id', productId);
-
   res.status(201).json(loan[0]);
 });
 
@@ -572,67 +455,40 @@ app.get('/api/loans/:id/payments', async (req, res) => {
     .select('*')
     .eq('loan_id', id)
     .order('payment_date', { ascending: false });
-
-  if (error) {
-    console.error('Payment fetch error:', error);
-    return res.status(500).json({ error: error.message });
-  }
+  if (error) return res.status(500).json({ error: error.message });
   res.json(data);
 });
+
 app.post('/api/loans/:id/pay', async (req, res) => {
   const { id } = req.params;
   const { amount, notes } = req.body;
-
   if (!amount || amount <= 0) {
     return res.status(400).json({ error: 'Valid amount is required' });
   }
-
   try {
-    // 1. Get the loan
     const { data: loan, error: loanErr } = await supabase
       .from('loans')
       .select('id, amount, remaining, customer_id, product_id, due_date, notes, status')
       .eq('id', id)
       .single();
-
-    if (loanErr || !loan) {
-      return res.status(404).json({ error: 'Loan not found' });
-    }
-
+    if (loanErr || !loan) return res.status(404).json({ error: 'Loan not found' });
     if (amount > loan.remaining) {
-      return res.status(400).json({ 
-        error: `Payment exceeds remaining balance (₦${loan.remaining.toFixed(2)})` 
-      });
+      return res.status(400).json({ error: `Payment exceeds remaining balance (₦${loan.remaining.toFixed(2)})` });
     }
-
-    // 2. Insert payment
     const { data: payment, error: payErr } = await supabase
       .from('payments')
-      .insert({
-        loan_id: id,
-        amount: amount,
-        notes: notes || null,
-      })
+      .insert({ loan_id: id, amount: amount, notes: notes || null })
       .select();
-
     if (payErr) {
       console.error('Payment insert error:', payErr);
       return res.status(500).json({ error: payErr.message });
     }
-
-    // 3. Update loan
     const newRemaining = loan.remaining - amount;
     const newStatus = newRemaining <= 0.01 ? 'paid' : 'active';
-
     await supabase
       .from('loans')
-      .update({ 
-        remaining: newRemaining, 
-        status: newStatus 
-      })
+      .update({ remaining: newRemaining, status: newStatus })
       .eq('id', id);
-
-    // 4. Fetch updated loan with customer and product info
     const { data: updatedLoan, error: fetchErr } = await supabase
       .from('loans')
       .select(`
@@ -642,10 +498,7 @@ app.post('/api/loans/:id/pay', async (req, res) => {
       `)
       .eq('id', id)
       .single();
-
     if (fetchErr) {
-      console.error('Fetch updated loan error:', fetchErr);
-      // Return minimal success response
       return res.status(201).json({
         success: true,
         payment: payment[0],
@@ -654,17 +507,12 @@ app.post('/api/loans/:id/pay', async (req, res) => {
         message: 'Payment recorded but loan details could not be refreshed'
       });
     }
-
-    // 5. Get all payments for this loan (to show history)
     const { data: allPayments, error: payHistoryErr } = await supabase
       .from('payments')
       .select('*')
       .eq('loan_id', id)
       .order('payment_date', { ascending: false });
-
     if (payHistoryErr) {
-      console.error('Payment history error:', payHistoryErr);
-      // Still return the loan data without payment history
       return res.status(201).json({
         success: true,
         loan: updatedLoan,
@@ -673,8 +521,6 @@ app.post('/api/loans/:id/pay', async (req, res) => {
         is_paid: newStatus === 'paid'
       });
     }
-
-    // 6. Return everything
     res.status(201).json({
       success: true,
       loan: updatedLoan,
@@ -683,7 +529,6 @@ app.post('/api/loans/:id/pay', async (req, res) => {
       remaining: newRemaining,
       is_paid: newStatus === 'paid'
     });
-
   } catch (error) {
     console.error('Payment error:', error);
     res.status(500).json({ error: error.message });
@@ -692,24 +537,47 @@ app.post('/api/loans/:id/pay', async (req, res) => {
 
 app.delete('/api/loans/:id', async (req, res) => {
   const { id } = req.params;
-
   const { data: loan, error: findErr } = await supabase
     .from('loans')
     .select('id')
     .eq('id', id)
     .single();
-
-  if (findErr || !loan) {
-    return res.status(404).json({ error: 'Loan not found' });
-  }
-
+  if (findErr || !loan) return res.status(404).json({ error: 'Loan not found' });
   const { error } = await supabase
     .from('loans')
     .delete()
     .eq('id', id);
-
   if (error) return res.status(500).json({ error: error.message });
   res.json({ success: true });
+});
+
+// ----- Bulk Import Products -----
+app.post('/api/products/bulk', async (req, res) => {
+  const { products } = req.body;
+  if (!products || !Array.isArray(products) || products.length === 0) {
+    return res.status(400).json({ error: 'No products to import' });
+  }
+  try {
+    const productData = products.map(p => ({
+      name: p.name.trim(),
+      price: parseFloat(p.price),
+      category: p.category?.trim() || 'Sweet',
+      quantity: parseInt(p.quantity) || 0,
+    }));
+    const { data, error } = await supabase
+      .from('products')
+      .insert(productData)
+      .select();
+    if (error) throw error;
+    res.status(201).json({
+      success: true,
+      imported: data.length,
+      products: data,
+    });
+  } catch (err) {
+    console.error('Bulk import error:', err);
+    res.status(500).json({ error: err.message });
+  }
 });
 
 // ----- Restock Products -----
@@ -718,57 +586,41 @@ app.post('/api/products/restock', async (req, res) => {
   if (!productId || !quantity || quantity <= 0) {
     return res.status(400).json({ error: 'Product ID and quantity > 0 are required' });
   }
-
   const { data: product, error: getErr } = await supabase
     .from('products')
     .select('quantity')
     .eq('id', productId)
     .single();
-
   if (getErr) return res.status(500).json({ error: getErr.message });
   if (!product) return res.status(404).json({ error: 'Product not found' });
-
   const newStock = product.quantity + parseInt(quantity);
   const { error: updateErr } = await supabase
     .from('products')
     .update({ quantity: newStock })
     .eq('id', productId);
-
   if (updateErr) return res.status(500).json({ error: updateErr.message });
   res.json({ success: true, newStock });
 });
 
 // ----- Customers with Balance -----
 app.get('/api/customers/with-balance', async (req, res) => {
-  // Complex query: aggregate sales and loans for each customer
-  // Using raw SQL or multiple queries. We'll do two separate queries and combine.
   try {
-    // Get all customers
     const { data: customers, error: cErr } = await supabase
       .from('customers')
       .select('*')
       .order('name');
-
     if (cErr) throw cErr;
-
     const result = await Promise.all(customers.map(async (c) => {
-      // Sales total
       const { data: sales, error: sErr } = await supabase
         .from('sales')
         .select('amount')
         .eq('customer_id', c.id);
-
       if (sErr) throw sErr;
-
-      // Loans total
       const { data: loans, error: lErr } = await supabase
         .from('loans')
         .select('amount')
         .eq('customer_id', c.id);
-
       if (lErr) throw lErr;
-
-      // Payments total (via loans)
       let payments = 0;
       if (loans && loans.length > 0) {
         const loanIds = loans.map(l => l.id);
@@ -776,14 +628,11 @@ app.get('/api/customers/with-balance', async (req, res) => {
           .from('payments')
           .select('amount')
           .in('loan_id', loanIds);
-
         if (pErr) throw pErr;
         payments = payData.reduce((sum, p) => sum + p.amount, 0);
       }
-
       const totalSales = sales.reduce((s, x) => s + x.amount, 0);
       const totalLoans = loans.reduce((s, x) => s + x.amount, 0);
-
       return {
         id: c.id,
         name: c.name,
@@ -791,52 +640,40 @@ app.get('/api/customers/with-balance', async (req, res) => {
         total_sales: totalSales,
         total_loans: totalLoans,
         total_payments: payments,
-        net_balance: totalSales - totalLoans + payments, // positive = credit, negative = debt
+        net_balance: totalSales - totalLoans + payments,
       };
     }));
-
     res.json(result);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });
 
-
 // ----- Dashboard Stats -----
 app.get('/api/dashboard/stats', async (req, res) => {
   const today = new Date().toISOString().slice(0, 10);
-
   try {
-    // Sales Today
     const { data: salesToday, error: s1 } = await supabase
       .from('sales')
       .select('amount')
       .gte('created_at', `${today}T00:00:00`)
       .lt('created_at', `${today}T23:59:59`);
     if (s1) throw s1;
-
-    // Loans Today
     const { data: loansToday, error: s2 } = await supabase
       .from('loans')
       .select('amount')
       .gte('created_at', `${today}T00:00:00`)
       .lt('created_at', `${today}T23:59:59`);
     if (s2) throw s2;
-
-    // Total Products Value (price * quantity)
     const { data: products, error: s3 } = await supabase
       .from('products')
       .select('price, quantity');
     if (s3) throw s3;
     const totalProductValue = products.reduce((acc, p) => acc + parseFloat(p.price || 0), 0);
-
-    // Total Customers
     const { count: totalCustomers, error: s4 } = await supabase
       .from('customers')
       .select('*', { count: 'exact', head: true });
     if (s4) throw s4;
-
-    // Recent 5 transactions (sales + loans combined)
     const { data: recentSales, error: s5 } = await supabase
       .from('sales')
       .select(`
@@ -846,9 +683,7 @@ app.get('/api/dashboard/stats', async (req, res) => {
       `)
       .order('created_at', { ascending: false })
       .limit(3);
-
     if (s5) throw s5;
-
     const { data: recentLoans, error: s6 } = await supabase
       .from('loans')
       .select(`
@@ -858,21 +693,16 @@ app.get('/api/dashboard/stats', async (req, res) => {
       `)
       .order('created_at', { ascending: false })
       .limit(3);
-
     if (s6) throw s6;
-
-    // Combine and sort by date
     const combined = [
       ...recentSales.map(r => ({ ...r, type: 'sale' })),
       ...recentLoans.map(r => ({ ...r, type: 'loan' })),
     ].sort((a, b) => new Date(b.created_at) - new Date(a.created_at)).slice(0, 5);
-
     const sum = (arr) => arr.reduce((acc, item) => acc + item.amount, 0);
-
     res.json({
       salesToday: sum(salesToday || []),
       loansToday: sum(loansToday || []),
-      totalProductValue: totalProductValue, // ✅ now sums price only
+      totalProductValue,
       totalCustomers: totalCustomers || 0,
       recentTransactions: combined.map(t => ({
         ...t,
@@ -892,18 +722,14 @@ app.get('/api/dashboard/stats', async (req, res) => {
 app.get('/api/history/sales', async (req, res) => {
   const { date } = req.query;
   if (!date) return res.status(400).json({ error: 'Date is required' });
-
   const start = `${date}T00:00:00`;
   const end = `${date}T23:59:59`;
-
   const { data, error } = await supabase
     .from('sales')
     .select('amount, created_at')
     .gte('created_at', start)
     .lte('created_at', end);
-
   if (error) return res.status(500).json({ error: error.message });
-
   const grouped = {};
   data.forEach(t => {
     const hour = new Date(t.created_at).getHours();
@@ -911,31 +737,25 @@ app.get('/api/history/sales', async (req, res) => {
     grouped[hour].total += t.amount;
     grouped[hour].count += 1;
   });
-
   const result = Object.keys(grouped).map(hour => ({
     hour: `${String(hour).padStart(2, '0')}:00`,
     total: grouped[hour].total,
     count: grouped[hour].count,
   })).sort((a, b) => parseInt(a.hour) - parseInt(b.hour));
-
   res.json(result);
 });
 
 app.get('/api/history/loans', async (req, res) => {
   const { date } = req.query;
   if (!date) return res.status(400).json({ error: 'Date is required' });
-
   const start = `${date}T00:00:00`;
   const end = `${date}T23:59:59`;
-
   const { data, error } = await supabase
     .from('loans')
     .select('amount, created_at')
     .gte('created_at', start)
     .lte('created_at', end);
-
   if (error) return res.status(500).json({ error: error.message });
-
   const grouped = {};
   data.forEach(t => {
     const hour = new Date(t.created_at).getHours();
@@ -943,31 +763,25 @@ app.get('/api/history/loans', async (req, res) => {
     grouped[hour].total += t.amount;
     grouped[hour].count += 1;
   });
-
   const result = Object.keys(grouped).map(hour => ({
     hour: `${String(hour).padStart(2, '0')}:00`,
     total: grouped[hour].total,
     count: grouped[hour].count,
   })).sort((a, b) => parseInt(a.hour) - parseInt(b.hour));
-
   res.json(result);
 });
 
 app.get('/api/history/products', async (req, res) => {
   const { date } = req.query;
   if (!date) return res.status(400).json({ error: 'Date is required' });
-
   const start = `${date}T00:00:00`;
   const end = `${date}T23:59:59`;
-
   const { data, error } = await supabase
     .from('products')
     .select('price, quantity, created_at')
     .gte('created_at', start)
     .lte('created_at', end);
-
   if (error) return res.status(500).json({ error: error.message });
-
   const grouped = {};
   data.forEach(p => {
     const hour = new Date(p.created_at).getHours();
@@ -975,31 +789,25 @@ app.get('/api/history/products', async (req, res) => {
     grouped[hour].total += p.price * (p.quantity || 0);
     grouped[hour].count += 1;
   });
-
   const result = Object.keys(grouped).map(hour => ({
     hour: `${String(hour).padStart(2, '0')}:00`,
     total: grouped[hour].total,
     count: grouped[hour].count,
   })).sort((a, b) => parseInt(a.hour) - parseInt(b.hour));
-
   res.json(result);
 });
 
 app.get('/api/history/customers', async (req, res) => {
   const { date } = req.query;
   if (!date) return res.status(400).json({ error: 'Date is required' });
-
   const start = `${date}T00:00:00`;
   const end = `${date}T23:59:59`;
-
   const { data, error } = await supabase
     .from('customers')
     .select('created_at')
     .gte('created_at', start)
     .lte('created_at', end);
-
   if (error) return res.status(500).json({ error: error.message });
-
   const grouped = {};
   data.forEach(c => {
     const hour = new Date(c.created_at).getHours();
@@ -1007,21 +815,17 @@ app.get('/api/history/customers', async (req, res) => {
     grouped[hour].count += 1;
     grouped[hour].total += 1;
   });
-
   const result = Object.keys(grouped).map(hour => ({
     hour: `${String(hour).padStart(2, '0')}:00`,
     total: grouped[hour].total,
     count: grouped[hour].count,
   })).sort((a, b) => parseInt(a.hour) - parseInt(b.hour));
-
   res.json(result);
 });
 
 // ----- Customer History (grouped by date) -----
 app.get('/api/customers/:id/history', async (req, res) => {
   const { id } = req.params;
-
-  // Get sales
   const { data: sales, error: sErr } = await supabase
     .from('sales')
     .select(`
@@ -1030,10 +834,7 @@ app.get('/api/customers/:id/history', async (req, res) => {
     `)
     .eq('customer_id', id)
     .order('created_at', { ascending: false });
-
   if (sErr) return res.status(500).json({ error: sErr.message });
-
-  // Get loans
   const { data: loans, error: lErr } = await supabase
     .from('loans')
     .select(`
@@ -1042,14 +843,11 @@ app.get('/api/customers/:id/history', async (req, res) => {
     `)
     .eq('customer_id', id)
     .order('created_at', { ascending: false });
-
   if (lErr) return res.status(500).json({ error: lErr.message });
-
   const all = [
     ...sales.map(s => ({ ...s, type: 'sale' })),
     ...loans.map(l => ({ ...l, type: 'loan' })),
   ].sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
-
   const grouped = {};
   all.forEach(t => {
     const date = new Date(t.created_at).toISOString().slice(0, 10);
@@ -1064,7 +862,6 @@ app.get('/api/customers/:id/history', async (req, res) => {
       notes: t.notes,
     });
   });
-
   res.json(grouped);
 });
 
@@ -1086,13 +883,8 @@ app.post('/api/notes', async (req, res) => {
     .insert({ title, content })
     .select();
   if (error) return res.status(500).json({ error: error.message });
-
   // Send push notification
-  await sendPushNotification(
-    '📝 New Note',
-    `"${title}" was created`
-  );
-
+  await sendPushNotification('📝 New Note', `"${title}" was created`);
   res.status(201).json(data[0]);
 });
 
@@ -1109,36 +901,24 @@ app.patch('/api/notes/:id', async (req, res) => {
     .eq('id', id)
     .select();
   if (error) return res.status(500).json({ error: error.message });
-
-  await sendPushNotification(
-    '✏️ Note Updated',
-    `"${title || data[0].title}" was updated`
-  );
-
+  await sendPushNotification('✏️ Note Updated', `"${title || data[0].title}" was updated`);
   res.json(data[0]);
 });
 
 app.delete('/api/notes/:id', async (req, res) => {
   const { id } = req.params;
-  // Get note title before deleting
   const { data: note, error: fetchErr } = await supabase
     .from('notes')
     .select('title')
     .eq('id', id)
     .single();
   if (fetchErr) return res.status(500).json({ error: fetchErr.message });
-
   const { error } = await supabase
     .from('notes')
     .delete()
     .eq('id', id);
   if (error) return res.status(500).json({ error: error.message });
-
-  await sendPushNotification(
-    '🗑️ Note Deleted',
-    `"${note.title}" was deleted`
-  );
-
+  await sendPushNotification('🗑️ Note Deleted', `"${note.title}" was deleted`);
   res.json({ success: true });
 });
 
@@ -1165,6 +945,7 @@ app.get('/', (req, res) => {
     }
   });
 });
+
 // ========== START SERVER ==========
 app.listen(port, async () => {
   console.log(`🍪 RAHUSA Backend is running on http://localhost:${port}`);
