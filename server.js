@@ -33,18 +33,78 @@ if (process.env.HTTP_PROXY) {
 const supabase = createClient(supabaseUrl, supabaseKey, {
   fetch: customFetch,
 });
-const admin = require('firebase-admin');
-
-let serviceAccount;
-if (process.env.FIREBASE_SERVICE_ACCOUNT) {
-  serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT);
-} else {
-  serviceAccount = require('./serviceAccountKey.json');
+// ---- Firebase Admin for push notifications ----
+let admin;
+let adminInitialized = false;
+try {
+  admin = require('firebase-admin');
+  console.log('✅ firebase-admin module loaded');
+} catch (e) {
+  console.error('❌ firebase-admin module not found:', e.message);
 }
 
-admin.initializeApp({
-  credential: admin.credential.cert(serviceAccount),
-});
+let serviceAccount;
+if (admin && process.env.FIREBASE_SERVICE_ACCOUNT) {
+  try {
+    serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT);
+    console.log('✅ Service account loaded from environment variable');
+  } catch (e) {
+    console.error('❌ Invalid FIREBASE_SERVICE_ACCOUNT JSON:', e.message);
+  }
+} else if (admin) {
+  // Fallback to local file (development)
+  try {
+    serviceAccount = require('./serviceAccountKey.json');
+    console.log('✅ Service account loaded from file');
+  } catch (e) {
+    console.warn('⚠️ serviceAccountKey.json not found');
+  }
+}
+
+if (admin && serviceAccount) {
+  try {
+    admin.initializeApp({
+      credential: admin.credential.cert(serviceAccount),
+    });
+    adminInitialized = true;
+    console.log('✅ Firebase Admin initialized successfully');
+  } catch (e) {
+    console.error('❌ Firebase Admin initialization failed:', e.message);
+  }
+} else {
+  console.warn('⚠️ Firebase Admin not initialized. Push notifications disabled.');
+}
+
+// ---- Helper to send push notifications (safe) ----
+async function sendPushNotification(title, body, data = {}) {
+  if (!adminInitialized) {
+    console.warn('⚠️ Push notifications disabled – Firebase Admin not initialized.');
+    return;
+  }
+  try {
+    const { data: tokens, error } = await supabase
+      .from('push_tokens')
+      .select('token');
+    if (error) {
+      console.error('Error fetching push tokens:', error);
+      return;
+    }
+    if (tokens.length === 0) return;
+
+    const registrationTokens = tokens.map(t => t.token);
+    const message = {
+      notification: { title, body },
+      data: data,
+      tokens: registrationTokens,
+    };
+
+    const response = await admin.messaging().sendEachForMulticast(message);
+    console.log(`${response.successCount} push notifications sent`);
+    // Optionally clean up failed tokens here
+  } catch (err) {
+    console.error('Push send error:', err);
+  }
+}
 console.log('🔌 Connected to Supabase:', supabaseUrl);
 
 // ========== SEED DEFAULT PRODUCTS ==========
