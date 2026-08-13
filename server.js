@@ -37,6 +37,7 @@ console.log('🔌 Connected to Supabase:', supabaseUrl);
 
 // ========== FIREBASE ADMIN (Push Notifications) ==========
 // ---- Firebase Admin for push notifications ----
+// ---- Firebase Admin for push notifications ----
 const admin = require('firebase-admin');
 
 let adminInitialized = false;
@@ -51,38 +52,28 @@ if (process.env.FIREBASE_SERVICE_ACCOUNT) {
     serviceAccount = null;
   }
 } else {
-  // Local development fallback – ensure file is in .gitignore
+  // Local development fallback
   try {
     serviceAccount = require('./serviceAccountKey.json');
     console.log('✅ Service account loaded from file');
   } catch (e) {
-    console.warn('⚠️ serviceAccountKey.json not found. Push notifications disabled.');
+    console.warn('⚠️ serviceAccountKey.json not found');
   }
 }
 
-if (serviceAccount) {
+// Check if admin.credential exists and is usable
+if (admin.credential && typeof admin.credential.cert === 'function' && serviceAccount) {
   try {
-    // Check if admin.credential is available
-    if (admin.credential && typeof admin.credential.cert === 'function') {
-      admin.initializeApp({
-        credential: admin.credential.cert(serviceAccount),
-      });
-      adminInitialized = true;
-      console.log('✅ Firebase Admin initialized successfully with cert');
-    } else {
-      // Fallback: try applicationDefault (useful for Google Cloud environments)
-      console.warn('⚠️ admin.credential.cert not available, trying applicationDefault');
-      admin.initializeApp({
-        credential: admin.credential.applicationDefault(),
-      });
-      adminInitialized = true;
-      console.log('✅ Firebase Admin initialized with applicationDefault');
-    }
+    admin.initializeApp({
+      credential: admin.credential.cert(serviceAccount),
+    });
+    adminInitialized = true;
+    console.log('✅ Firebase Admin initialized successfully');
   } catch (e) {
     console.error('❌ Firebase Admin initialization failed:', e.message);
   }
 } else {
-  console.warn('⚠️ No service account provided. Push notifications disabled.');
+  console.warn('⚠️ admin.credential.cert not available or service account missing. Push notifications disabled.');
 }
 
 // ---- Helper to send push notifications ----
