@@ -988,28 +988,21 @@ app.get('/api/notes', async (req, res) => {
 });
 
 app.post('/api/notes', async (req, res) => {
-  console.log('📝 POST /api/notes received');
   const { title, content } = req.body;
-  console.log('Title:', title, 'Content:', content);
-  if (!title) {
-    console.log('❌ Missing title');
-    return res.status(400).json({ error: 'Title is required' });
-  }
-  try {
-    const { data, error } = await supabase
-      .from('notes')
-      .insert({ title, content })
-      .select();
-    if (error) {
-      console.error('❌ Supabase error:', error);
-      throw error;
-    }
-    console.log('✅ Note saved:', data[0]);
-    res.status(201).json(data[0]);
-  } catch (err) {
-    console.error('❌ Error saving note:', err.message);
-    res.status(500).json({ error: err.message });
-  }
+  if (!title) return res.status(400).json({ error: 'Title is required' });
+  const { data, error } = await supabase
+    .from('notes')
+    .insert({ title, content })
+    .select();
+  if (error) return res.status(500).json({ error: error.message });
+
+  // Send push notification
+  await sendPushNotification(
+    '📝 New Note',
+    `"${title}" was created`
+  );
+
+  res.status(201).json(data[0]);
 });
 
 app.patch('/api/notes/:id', async (req, res) => {
@@ -1025,16 +1018,36 @@ app.patch('/api/notes/:id', async (req, res) => {
     .eq('id', id)
     .select();
   if (error) return res.status(500).json({ error: error.message });
+
+  await sendPushNotification(
+    '✏️ Note Updated',
+    `"${title || data[0].title}" was updated`
+  );
+
   res.json(data[0]);
 });
 
 app.delete('/api/notes/:id', async (req, res) => {
   const { id } = req.params;
+  // Get note title before deleting
+  const { data: note, error: fetchErr } = await supabase
+    .from('notes')
+    .select('title')
+    .eq('id', id)
+    .single();
+  if (fetchErr) return res.status(500).json({ error: fetchErr.message });
+
   const { error } = await supabase
     .from('notes')
     .delete()
     .eq('id', id);
   if (error) return res.status(500).json({ error: error.message });
+
+  await sendPushNotification(
+    '🗑️ Note Deleted',
+    `"${note.title}" was deleted`
+  );
+
   res.json({ success: true });
 });
 
